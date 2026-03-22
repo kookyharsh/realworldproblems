@@ -1,0 +1,3 @@
+{
+  "extends": "@RealWorldProjects/config/tsconfig.base.json"
+}
