@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated"
   moduleFormat = "esm"
   runtime = "nodejs"
@@ -7,4 +7,282 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum SolutionVoteType {
+  UP
+  DOWN
+}
+
+enum KarmaReason {
+  SOLUTION_UPVOTED
+  SOLUTION_ACCEPTED
+  COMMUNITY_FAVOURITE
+  ME_TOO_MILESTONE
+  SOLUTION_DOWNVOTED
+}
+
+enum GitHubRepoStatus {
+  ACTIVE
+  DEGRADED
+  DELETED
+}
+
+enum ProblemStatus {
+  OPEN
+  SOLVED
+}
+
+model User {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String?
+  username        String?        @unique
+  email           String?        @unique
+  emailVerified   DateTime?
+  image           String?
+  avatar          String?        // Legacy/Custom avatar field
+  bio             String?
+  karma           Int            @default(0)
+  githubId        Int?           @unique
+  githubUsername  String?
+  githubToken     String?        // Encrypted
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+
+  problems        Problem[]
+  solutions       Solution[]
+  solutionVotes   SolutionVote[]
+  comments        Comment[]
+  githubRepos     GitHubRepo[]
+  karmaEvents     KarmaEvent[]
+  notifications   Notification[]
+  meToo           MeToo[]
+  problemChains   ProblemChain[] @relation("CreatedBy")
+
+  @@index([username])
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String  @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionToken String   @unique
+  userId       String   @db.Uuid
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Problem {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String
+  description     String
+  userId          String?        @db.Uuid
+  user            User?          @relation(fields: [userId], references: [id])
+  anonTokenHash   String?
+  isAnonymous     Boolean        @default(false)
+  status          ProblemStatus  @default(OPEN)
+  meTooCount      Int            @default(0)
+  viewCount       Int            @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tags            ProblemTag[]
+  solutions       Solution[]
+  meTooRecords    MeToo[]
+  chainsFrom      ProblemChain[] @relation("FromProblem")
+  chainsTo        ProblemChain[] @relation("ToProblem")
+
+  searchVector    Unsupported("tsvector")?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Tag {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String         @unique
+  category        String
+  slug            String         @unique
+  problems        ProblemTag[]
+}
+
+model ProblemTag {
+  problemId       String         @db.Uuid
+  tagId           String         @db.Uuid
+  problem         Problem        @relation(fields: [problemId], references: [id])
+  tag             Tag            @relation(fields: [tagId], references: [id])
+
+  @@id([problemId, tagId])
+}
+
+model Solution {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  problemId       String         @db.Uuid
+  problem         Problem        @relation(fields: [problemId], references: [id])
+  userId          String         @db.Uuid
+  user            User           @relation(fields: [userId], references: [id])
+  content         String
+  isAccepted      Boolean        @default(false)
+  isCommunityFav  Boolean        @default(false)
+  upvoteCount     Int            @default(0)
+  downvoteCount   Int            @default(0)
+  githubRepoId    String?        @db.Uuid
+  githubRepo      GitHubRepo?    @relation(fields: [githubRepoId], references: [id])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  votes           SolutionVote[]
+  comments        Comment[]
+
+  searchVector    Unsupported("tsvector")?
+
+  @@index([problemId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SolutionVote {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId      String           @db.Uuid
+  solution        Solution         @relation(fields: [solutionId], references: [id])
+  userId          String           @db.Uuid
+  user            User             @relation(fields: [userId], references: [id])
+  voteType        SolutionVoteType
+  createdAt       DateTime         @default(now())
+
+  @@unique([solutionId, userId])
+  @@index([solutionId])
+  @@index([userId])
+}
+
+model Comment {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  solutionId      String         @db.Uuid
+  solution        Solution       @relation(fields: [solutionId], references: [id])
+  userId          String         @db.Uuid
+  user            User           @relation(fields: [userId], references: [id])
+  content         String
+  parentId        String?        @db.Uuid
+  parent          Comment?       @relation("CommentToComment", fields: [parentId], references: [id])
+  children        Comment[]      @relation("CommentToComment")
+  upvoteCount     Int            @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([solutionId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model GitHubRepo {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String           @db.Uuid
+  user            User             @relation(fields: [userId], references: [id])
+  githubRepoId    Int
+  owner           String
+  name            String
+  description     String?
+  htmlUrl         String
+  language        String?
+  topics          String[]
+  stars           Int              @default(0)
+  forks           Int              @default(0)
+  openIssues      Int              @default(0)
+  lastCommitMsg   String?
+  lastPushedAt    DateTime?
+  readmeContent   String?
+  lastSyncedAt    DateTime?
+  webhookId       Int?
+  webhookSecret   String?          // Encrypted
+  status          GitHubRepoStatus @default(ACTIVE)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  solutions       Solution[]
+
+  @@index([userId])
+}
+
+model KarmaEvent {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String       @db.Uuid
+  user            User         @relation(fields: [userId], references: [id])
+  points          Int
+  reason          KarmaReason
+  refId           String?      @db.Uuid
+  createdAt       DateTime     @default(now())
+
+  @@index([userId])
+}
+
+model Notification {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String       @db.Uuid
+  user            User         @relation(fields: [userId], references: [id])
+  type            String
+  data            Json
+  isRead          Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+model MeToo {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  problemId       String       @db.Uuid
+  problem         Problem      @relation(fields: [problemId], references: [id])
+  userId          String?      @db.Uuid
+  user            User?        @relation(fields: [userId], references: [id])
+  anonHash        String?
+  createdAt       DateTime     @default(now())
+
+  @@unique([problemId, userId])
+  @@index([problemId])
+  @@index([userId])
+}
+
+model ProblemChain {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fromProblemId   String       @db.Uuid
+  fromProblem     Problem      @relation("FromProblem", fields: [fromProblemId], references: [id])
+  toProblemId     String       @db.Uuid
+  toProblem       Problem      @relation("ToProblem", fields: [toProblemId], references: [id])
+  createdBy       String       @db.Uuid
+  creator         User         @relation("CreatedBy", fields: [createdBy], references: [id])
+  note            String?
+  createdAt       DateTime     @default(now())
+
+  @@index([fromProblemId])
+  @@index([toProblemId])
 }
